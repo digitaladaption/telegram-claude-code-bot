@@ -24,6 +24,7 @@ class Session:
     created_at: datetime
     last_used: datetime
     is_active: bool = True
+    active_repo: Optional[Dict] = None  # Repository information for the session
 
     def to_dict(self) -> dict:
         """Convert session to dictionary"""
@@ -34,7 +35,8 @@ class Session:
             'working_dir': self.working_dir,
             'created_at': self.created_at.isoformat(),
             'last_used': self.last_used.isoformat(),
-            'is_active': self.is_active
+            'is_active': self.is_active,
+            'active_repo': self.active_repo
         }
 
     @classmethod
@@ -47,7 +49,8 @@ class Session:
             working_dir=data['working_dir'],
             created_at=datetime.fromisoformat(data['created_at']),
             last_used=datetime.fromisoformat(data['last_used']),
-            is_active=data.get('is_active', True)
+            is_active=data.get('is_active', True),
+            active_repo=data.get('active_repo')
         )
 
 
@@ -276,3 +279,31 @@ class SessionManager:
 
         logger.info(f"Imported {imported_count} sessions")
         return imported_count
+
+    def set_active_repo(self, user_id: int, owner: str, repo: str, url: str):
+        """Set active repository for user's session"""
+        session = self.get_user_active_session(user_id)
+        if session:
+            session.active_repo = {
+                'owner': owner,
+                'repo': repo,
+                'url': url,
+                'loaded_at': datetime.now().isoformat()
+            }
+            self._save_sessions()
+            logger.info(f"Active repository set for user {user_id}: {owner}/{repo}")
+
+    def get_active_repo(self, user_id: int) -> Optional[Dict]:
+        """Get active repository for user's session"""
+        session = self.get_user_active_session(user_id)
+        if session and session.active_repo:
+            return session.active_repo
+        return None
+
+    def clear_active_repo(self, user_id: int):
+        """Clear active repository for user's session"""
+        session = self.get_user_active_session(user_id)
+        if session and session.active_repo:
+            session.active_repo = None
+            self._save_sessions()
+            logger.info(f"Active repository cleared for user {user_id}")
