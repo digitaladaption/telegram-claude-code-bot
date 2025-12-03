@@ -39,6 +39,7 @@ class PersonalCodeAssistant:
         self.github_token = os.getenv('GITHUB_TOKEN')
         self.anthropic_key = os.getenv('ANTHROPIC_API_KEY')
         self.openai_key = os.getenv('OPENAI_API_KEY')
+        self.moonshot_key = os.getenv('MOONSHOT_API_KEY')  # Kimi K2 API key
         self.workspace_dir = Path(os.getenv('DEFAULT_WORKSPACE', '/tmp/telegram_bot_workspaces'))
 
         # Create workspace directory
@@ -68,10 +69,34 @@ class PersonalCodeAssistant:
             except Exception as e:
                 logger.error(f"❌ Failed to initialize Claude: {e}")
 
+        elif self.moonshot_key:
+            # Kimi K2 uses OpenAI-compatible API
+            try:
+                import openai
+                self.llm_client = openai.OpenAI(
+                    api_key=self.moonshot_key,
+                    base_url="https://api.moonshot.cn/v1"
+                )
+                self.llm_type = "Kimi K2"
+                logger.info("✅ Kimi K2 API initialized")
+            except ImportError:
+                self.llm_type = "Kimi K2"
+                logger.info("✅ Kimi K2 API configured (install openai package)")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Kimi K2: {e}")
+
         elif self.openai_key:
-            self.llm_type = "OpenAI"
-            logger.info("✅ OpenAI API configured")
-            # Note: Would need to install openai package for this
+            try:
+                import openai
+                self.llm_client = openai.OpenAI(api_key=self.openai_key)
+                self.llm_type = "OpenAI"
+                logger.info("✅ OpenAI API initialized")
+            except ImportError:
+                self.llm_type = "OpenAI"
+                logger.info("✅ OpenAI API configured (install openai package)")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize OpenAI: {e}")
+
         else:
             logger.warning("⚠️ No LLM API key found - AI features disabled")
 
@@ -517,7 +542,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not assistant.llm_client:
         await update.message.reply_text(
             "🤖 AI assistance not available - no LLM API key configured\n\n"
-            "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file"
+            "Set one of these in your .env file:\n"
+            "• ANTHROPIC_API_KEY (for Claude)\n"
+            "• OPENAI_API_KEY (for GPT)\n"
+            "• MOONSHOT_API_KEY (for Kimi K2)"
         )
         return
 
@@ -538,11 +566,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             ai_response = response.content[0].text
 
+        elif assistant.llm_type == "OpenAI":
+            response = assistant.llm_client.chat.completions.create(
+                model="gpt-4",
+                max_tokens=1000,
+                messages=[{
+                    "role": "system",
+                    "content": f"You are a helpful coding assistant. The user is working on a project called '{assistant.session_data.get('active_repo', 'unknown')}'."
+                }, {
+                    "role": "user",
+                    "content": user_message
+                }]
+            )
+
+            ai_response = response.choices[0].message.content
+
+        elif assistant.llm_type == "Kimi K2":
+            response = assistant.llm_client.chat.completions.create(
+                model="moonshot-v1-8k",  # Kimi K2 model
+                max_tokens=1000,
+                messages=[{
+                    "role": "system",
+                    "content": f"You are a helpful coding assistant. The user is working on a project called '{assistant.session_data.get('active_repo', 'unknown')}'. Provide clear, practical coding help."
+                }, {
+                    "role": "user",
+                    "content": user_message
+                }],
+                temperature=0.3
+            )
+
+            ai_response = response.choices[0].message.content
+
         else:
-            ai_response = "OpenAI integration not implemented yet"
+            ai_response = f"{assistant.llm_type} integration not implemented yet"
 
         await update.message.reply_text(
-            f"🤖 **AI Assistant**:\n\n{ai_response}"
+            f"🤖 **{assistant.llm_type} Assistant**:\n\n{ai_response}"
         )
 
     except Exception as e:

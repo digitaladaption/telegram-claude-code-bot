@@ -134,7 +134,12 @@ Your Phone (Telegram) ←→ Your Bot (Running on your machine) ←→ Your Code
 ```bash
 # Required
 TELEGRAM_BOT_TOKEN=your_token
-ANTHROPIC_API_KEY=your_key  # OR OPENAI_API_KEY
+# Choose ONE LLM API key:
+ANTHROPIC_API_KEY=your_claude_key_here
+# OR
+OPENAI_API_KEY=your_openai_key_here
+# OR
+MOONSHOT_API_KEY=your_kimi_k2_key_here
 
 # Optional
 GITHUB_TOKEN=github_pat_for_https_cloning
@@ -190,6 +195,18 @@ LOG_LEVEL=INFO
 | `/explain` | Get AI explanation of selected code |
 | `/refactor` | Ask AI to improve code |
 | `/debug` | Get help fixing bugs |
+
+### Supported AI Models
+
+**🤖 Available LLMs:**
+- **Claude (Anthropic)** - Excellent reasoning and coding
+- **GPT-4 (OpenAI)** - Great all-around coding assistant
+- **Kimi K2 (Moonshot AI)** - Powerful Chinese-English bilingual model
+
+**How it works:**
+- The bot automatically detects which API key you configure
+- Set only ONE LLM API key in your `.env` file
+- Each model offers different strengths for coding tasks
 
 ## 🐛 Troubleshooting
 

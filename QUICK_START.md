@@ -21,7 +21,12 @@ nano .env
 Paste this into your `.env` file:
 ```bash
 TELEGRAM_BOT_TOKEN=paste_your_token_here
+# Choose ONE AI model:
 ANTHROPIC_API_KEY=your_claude_key_here
+# OR
+OPENAI_API_KEY=your_openai_key_here
+# OR
+MOONSHOT_API_KEY=your_kimi_k2_key_here
 GITHUB_TOKEN=your_github_token_here
 ```
 
