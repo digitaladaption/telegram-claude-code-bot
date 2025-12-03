@@ -506,9 +506,10 @@ Requirements:
         try:
             os.chdir(self.session_data['repo_path'])
 
-            # Check if there are changes
-            diff_result = subprocess.run(['git', 'diff'], capture_output=True, text=True)
-            if not diff_result.stdout.strip():
+            # Check if there are changes (both staged and unstaged)
+            staged_result = subprocess.run(['git', 'diff', '--staged'], capture_output=True, text=True)
+            unstaged_result = subprocess.run(['git', 'diff'], capture_output=True, text=True)
+            if not staged_result.stdout.strip() and not unstaged_result.stdout.strip():
                 return {'success': False, 'error': 'No changes to commit'}
 
             # Add all changes
@@ -558,30 +559,268 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_msg = f"""👋 Welcome {user.first_name}!
 
-🤖 **Personal Code Assistant** - Control your code from Telegram!
+🤖 **Personal Code Assistant** - Control your code from Telegram! 📱✨
 
-**Quick Start:**
-📁 Load a repo: `/loadrepo owner/repo` or `/setrepo /path/to/local`
-📂 Browse files: `/files`
-📖 View code: `/view filename.py`
-🤖 Get AI help: Just ask me anything about your code!
+Choose an option below or use commands directly:"""
 
-**🔥 AI-Powered Workflow:**
-🔍 `/analyze filename` - AI analyzes code for issues
-🔧 `/fix filename issue` - AI suggests fixes
-✅ `/approve_fix` - Apply AI suggested fix
-❌ `/reject_fix` - Discard AI fix
-📝 `/ai_commit "message"` - Smart git commits
+    # Create inline keyboard with main menu options
+    keyboard = [
+        [
+            InlineKeyboardButton("📁 Load Repository", callback_data="menu_loadrepo"),
+            InlineKeyboardButton("📂 Browse Files", callback_data="menu_files"),
+        ],
+        [
+            InlineKeyboardButton("🔍 AI Analyze", callback_data="menu_analyze"),
+            InlineKeyboardButton("🔧 AI Fix", callback_data="menu_fix"),
+        ],
+        [
+            InlineKeyboardButton("📝 AI Commit", callback_data="menu_ai_commit"),
+            InlineKeyboardButton("📊 Status", callback_data="menu_status"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Git Operations", callback_data="menu_git"),
+            InlineKeyboardButton("❓ Help", callback_data="menu_help"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup)
+
+async def menu_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle menu button presses"""
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data
+
+    if action == "menu_loadrepo":
+        msg = """📁 **Load Repository**
+
+Use these commands:
+• `/loadrepo owner/repo` - Clone from GitHub
+• `/setrepo /path/to/local` - Use local directory
+
+Example: `/loadrepo digitaladaption/telegram-claude-code-bot`"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_files":
+        if not assistant.session_data['repo_path']:
+            msg = "❌ No repository loaded. Please load a repository first!"
+            keyboard = [[InlineKeyboardButton("📁 Load Repository", callback_data="menu_loadrepo")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup)
+        else:
+            # Show files
+            file_list = assistant.list_files()
+            if file_list:
+                msg = "📂 **Files in repository:**\n\n"
+                # Show first 10 files
+                for display_name, file_path in file_list[:10]:
+                    msg += f"• {display_name}\n"
+                if len(file_list) > 10:
+                    msg += f"... and {len(file_list) - 10} more files"
+
+                keyboard = [
+                    [InlineKeyboardButton("📖 View File", callback_data="prompt_view")],
+                    [InlineKeyboardButton("✏️ Edit File", callback_data="prompt_edit")],
+                    [InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]
+                ]
+            else:
+                msg = "📁 No files found in repository"
+                keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_analyze":
+        if not assistant.session_data['repo_path']:
+            msg = "❌ No repository loaded. Please load a repository first!"
+        else:
+            msg = """🔍 **AI Code Analysis**
+
+Command: `/analyze filename`
+
+The AI will analyze your code for:
+• Bugs and logical errors
+• Code quality issues
+• Performance problems
+• Security vulnerabilities
+• Best practices violations
+
+Example: `/analyze app.py`"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_fix":
+        if not assistant.session_data['repo_path']:
+            msg = "❌ No repository loaded. Please load a repository first!"
+        else:
+            msg = """🔧 **AI-Powered Code Fixes**
+
+Command: `/fix filename issue_description`
+
+The AI will:
+• Fix the identified issue
+• Maintain existing functionality
+• Follow best practices
+• Provide clean, well-commented code
+
+Workflow:
+1. `/fix filename issue` - Generate fix
+2. `/show_fix` - Review the changes
+3. `/approve_fix` or `/reject_fix` - Choose action
+
+Example: `/fix app.py null pointer exception`"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_ai_commit":
+        if not assistant.session_data['repo_path']:
+            msg = "❌ No repository loaded. Please load a repository first!"
+        else:
+            msg = """📝 **AI-Powered Git Commits**
+
+Command: `/ai_commit "commit message"`
+
+The AI will:
+• Enhance your commit message
+• Follow conventional commit format
+• Provide descriptive commit messages
+
+Example: `/ai_commit "Fix login bug"`"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_status":
+        repo_info = assistant.session_data['active_repo'] or "None"
+        repo_path = assistant.session_data['repo_path'] or "None"
+
+        msg = f"""📊 **Bot Status**
+
+🤖 Repository: {repo_info}
+📁 Path: {repo_path}
+🔗 GitHub: {'✅' if assistant.github_token else '❌'}
+🤖 LLM: {assistant.llm_type or '❌ None'}
+
+**Current Session:**
+Last command: {assistant.session_data.get('last_command', 'None')}"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_git":
+        if not assistant.session_data['repo_path']:
+            msg = "❌ No repository loaded. Please load a repository first!"
+        else:
+            msg = """⚙️ **Git Operations**
+
+Available commands:
+• `/diff` - See changes
+• `/commit "message"` - Manual commit
+• `/push` - Push to GitHub
+• `/git_status` - Git status"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_help":
+        msg = """❓ **Help & Commands**
+
+**AI Workflow:**
+• `/analyze filename` - AI analysis
+• `/fix filename issue` - AI fixes
+• `/approve_fix` / `/reject_fix` - Handle AI fixes
+• `/ai_commit "message"` - Smart commits
+
+**File Operations:**
+• `/files [path]` - List files
+• `/view filename` - View file
+• `/edit filename content` - Edit file
 
 **Git Operations:**
-/diff - See changes
-/commit "message" - Save changes
-/push - Push to GitHub
-/status - Show bot status
+• `/diff` - See changes
+• `/commit "message"` - Manual commit
+• `/push` - Push to GitHub
+• `/status` - Bot status
 
-Ready to code from your phone! 📱✨"""
+**Setup:**
+• `/loadrepo owner/repo` - Clone GitHub repo
+• `/setrepo /path` - Use local repo
 
-    await update.message.reply_text(welcome_msg)
+Just ask me anything about your code! 🤖"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(msg, reply_markup=reply_markup)
+
+    elif action == "menu_main":
+        # Show main menu again
+        user = query.from_user
+        welcome_msg = f"""👋 Welcome back {user.first_name}!
+
+🤖 **Personal Code Assistant** - Choose an option:"""
+
+        keyboard = [
+            [
+                InlineKeyboardButton("📁 Load Repository", callback_data="menu_loadrepo"),
+                InlineKeyboardButton("📂 Browse Files", callback_data="menu_files"),
+            ],
+            [
+                InlineKeyboardButton("🔍 AI Analyze", callback_data="menu_analyze"),
+                InlineKeyboardButton("🔧 AI Fix", callback_data="menu_fix"),
+            ],
+            [
+                InlineKeyboardButton("📝 AI Commit", callback_data="menu_ai_commit"),
+                InlineKeyboardButton("📊 Status", callback_data="menu_status"),
+            ],
+            [
+                InlineKeyboardButton("⚙️ Git Operations", callback_data="menu_git"),
+                InlineKeyboardButton("❓ Help", callback_data="menu_help"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(welcome_msg, reply_markup=reply_markup)
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show main menu"""
+    user = update.effective_user
+    welcome_msg = f"""👋 **Main Menu** - {user.first_name}!
+
+🤖 **Personal Code Assistant** - Choose an option:"""
+
+    # Create inline keyboard with main menu options
+    keyboard = [
+        [
+            InlineKeyboardButton("📁 Load Repository", callback_data="menu_loadrepo"),
+            InlineKeyboardButton("📂 Browse Files", callback_data="menu_files"),
+        ],
+        [
+            InlineKeyboardButton("🔍 AI Analyze", callback_data="menu_analyze"),
+            InlineKeyboardButton("🔧 AI Fix", callback_data="menu_fix"),
+        ],
+        [
+            InlineKeyboardButton("📝 AI Commit", callback_data="menu_ai_commit"),
+            InlineKeyboardButton("📊 Status", callback_data="menu_status"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Git Operations", callback_data="menu_git"),
+            InlineKeyboardButton("❓ Help", callback_data="menu_help"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup)
 
 async def load_repo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Load a GitHub repository"""
@@ -1098,6 +1337,7 @@ def main():
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("loadrepo", load_repo))
     application.add_handler(CommandHandler("setrepo", set_repo))
     application.add_handler(CommandHandler("files", files))
@@ -1114,6 +1354,9 @@ def main():
     application.add_handler(CommandHandler("commit", commit))
     application.add_handler(CommandHandler("push", push))
     application.add_handler(CommandHandler("status", status))
+
+    # Add callback query handler for menu buttons
+    application.add_handler(CallbackQueryHandler(menu_button_handler))
 
     # Add message handler for AI assistance
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
