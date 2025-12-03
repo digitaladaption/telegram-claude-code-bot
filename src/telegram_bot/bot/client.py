@@ -175,6 +175,13 @@ class TelegramMessageFormatter:
             "• `/start_session` - Create new coding session\n"
             "• `/session_info` - Show current session details\n"
             "• `/end_session` - End current session\n\n"
+            "📁 **Repository Management:**\n"
+            "• `/loadrepo <url>` - Load a GitHub repository\n"
+            "  • Examples: `/loadrepo https://github.com/owner/repo`\n"
+            "  • Or: `/loadrepo owner/repo`\n"
+            "• `/files [path]` - Browse repository files\n"
+            "  • Example: `/files src/components`\n"
+            "  • List root: `/files`\n\n"
             "💬 **Coding:**\n"
             "• Just send any coding task as a message!\n"
             "• Example: `Create a Python script to scrape websites`\n"
@@ -185,7 +192,11 @@ class TelegramMessageFormatter:
             "ℹ️ **Other:**\n"
             "• `/help` - Show this help message\n"
             "• `/status` - Check bot status\n\n"
-            f"💡 **Tip:** Start a session first, then send your coding tasks!"
+            f"💡 **Pro Tips:**\n"
+            f"• Start a session first, then load a repository!\n"
+            f"• Use `/loadrepo` then `/files` to browse code\n"
+            f"• Repository buttons provide quick actions\n"
+            f"• Works with any public GitHub repository"
         )
 
     @staticmethod
