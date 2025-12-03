@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 # Import our custom modules
 from src.telegram_bot.bot.client import TelegramClient, TelegramMessageFormatter
 from src.telegram_bot.command.claude_cli_executor import ClaudeCliDirectExecutor
+from src.commands.repo_commands import RepoCommands
+from src.utils.repo_manager import RepoManager
+from src.utils.diff_helper import DiffHelper
 from session_manager import SessionManager
 
 # Load environment variables
@@ -36,6 +39,11 @@ class TelegramBotService:
         self.session_manager = SessionManager()
         self.claude_executor = ClaudeCliDirectExecutor(self.session_manager)
         self.message_formatter = TelegramMessageFormatter()
+
+        # Initialize repository management
+        self.repo_manager = RepoManager()
+        self.repo_commands = RepoCommands(self.session_manager)
+        self.diff_helper = DiffHelper()
 
         # Get security settings
         self.allowed_users = self._parse_user_list(os.getenv('ALLOWED_USERS', ''))
@@ -73,6 +81,10 @@ class TelegramBotService:
         application.add_handler(CommandHandler("end_session", self.handle_end_session))
         application.add_handler(CommandHandler("list_files", self.handle_list_files))
         application.add_handler(CommandHandler("status", self.handle_status))
+
+        # Repository commands
+        application.add_handler(CommandHandler("loadrepo", self.repo_commands.handle_loadrepo))
+        application.add_handler(CommandHandler("files", self.repo_commands.handle_files))
 
         # Admin commands
         application.add_handler(CommandHandler("admin_stats", self.handle_admin_stats))
@@ -339,6 +351,13 @@ class TelegramBotService:
         await query.answer()  # Acknowledge the callback
 
         data = query.data
+
+        # Check if this is a repository-related callback
+        if data in ["browse_files", "repo_info", "update_repo", "close_repo"]:
+            await self.repo_commands.handle_repo_callbacks(update, context)
+            return
+
+        # Handle session-related callbacks
         chat_id = query.message.chat_id
         message_id = query.message.message_id
 
