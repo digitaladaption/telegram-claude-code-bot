@@ -488,10 +488,22 @@ Requirements:
 
         try:
             os.chdir(self.session_data['repo_path'])
-            result = subprocess.run(['git', 'diff'], capture_output=True, text=True)
 
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout
+            # Check both staged and unstaged changes
+            staged_result = subprocess.run(['git', 'diff', '--staged'], capture_output=True, text=True)
+            unstaged_result = subprocess.run(['git', 'diff'], capture_output=True, text=True)
+
+            combined_diff = ""
+            if staged_result.stdout.strip():
+                combined_diff += "Staged Changes:\n" + staged_result.stdout
+            if unstaged_result.stdout.strip():
+                if combined_diff:
+                    combined_diff += "\nUnstaged Changes:\n" + unstaged_result.stdout
+                else:
+                    combined_diff = unstaged_result.stdout
+
+            if combined_diff.strip():
+                return combined_diff
             else:
                 return "No changes to commit"
 
