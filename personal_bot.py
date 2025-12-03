@@ -70,12 +70,12 @@ class PersonalCodeAssistant:
                 logger.error(f"❌ Failed to initialize Claude: {e}")
 
         elif self.moonshot_key:
-            # Kimi K2 uses OpenAI-compatible API
+            # Kimi K2 uses OpenAI-compatible API with correct endpoint
             try:
                 import openai
                 self.llm_client = openai.OpenAI(
                     api_key=self.moonshot_key,
-                    base_url="https://api.moonshot.cn/v1"
+                    base_url="https://api.moonshot.ai/v1"  # Correct endpoint
                 )
                 self.llm_type = "Kimi K2"
                 logger.info("✅ Kimi K2 API initialized")
@@ -313,6 +313,32 @@ class PersonalCodeAssistant:
         except Exception as e:
             return {'success': False, 'error': f'Error reading file: {str(e)}'}
 
+    def edit_file(self, file_path: str, new_content: str) -> Dict:
+        """Edit file contents"""
+        if not self.session_data['repo_path']:
+            return {'success': False, 'error': 'No repository set'}
+
+        try:
+            full_path = Path(self.session_data['repo_path']) / file_path
+
+            if not full_path.exists():
+                return {'success': False, 'error': 'File not found'}
+
+            if not full_path.is_file():
+                return {'success': False, 'error': 'Not a file'}
+
+            # Write new content
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+
+            return {
+                'success': True,
+                'message': f'File {file_path} updated successfully'
+            }
+
+        except Exception as e:
+            return {'success': False, 'error': f'Error writing file: {str(e)}'}
+
     def get_git_diff(self) -> str:
         """Get git diff"""
         if not self.session_data['repo_path']:
@@ -483,6 +509,50 @@ async def view_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ Error: {result['error']}")
 
+async def edit_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Edit file contents"""
+    if not context.args:
+        await update.message.reply_text("Usage: `/edit filename new_content`")
+        return
+
+    # Parse command: /edit filename rest_of_content
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("Usage: `/edit filename new_content`")
+        return
+
+    file_path = args[0]
+    new_content = " ".join(args[1:])
+
+    result = assistant.edit_file(file_path, new_content)
+
+    if result['success']:
+        await update.message.reply_text(
+            f"✅ **File Updated:** {file_path}\n\n"
+            f"📝 Changes saved. Use `/diff` to see changes or `/commit` to save to git."
+        )
+    else:
+        await update.message.reply_text(f"❌ Error: {result['error']}")
+
+async def git_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show git status"""
+    if not assistant.session_data['repo_path']:
+        await update.message.reply_text("❌ No repository loaded. Use `/loadrepo` or `/setrepo` first")
+        return
+
+    try:
+        os.chdir(assistant.session_data['repo_path'])
+        result = subprocess.run(['git', 'status'], capture_output=True, text=True, timeout=10)
+
+        if result.returncode == 0:
+            await update.message.reply_text(
+                f"📊 **Git Status:**\n\n```\n{result.stdout}\n```"
+            )
+        else:
+            await update.message.reply_text(f"❌ Git status error: {result.stderr}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
 async def diff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show git diff"""
     diff_text = assistant.get_git_diff()
@@ -582,20 +652,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_response = response.choices[0].message.content
 
         elif assistant.llm_type == "Kimi K2":
-            response = assistant.llm_client.chat.completions.create(
-                model="moonshot-v1-8k",  # Kimi K2 model
-                max_tokens=1000,
-                messages=[{
-                    "role": "system",
-                    "content": f"You are a helpful coding assistant. The user is working on a project called '{assistant.session_data.get('active_repo', 'unknown')}'. Provide clear, practical coding help."
-                }, {
-                    "role": "user",
-                    "content": user_message
-                }],
-                temperature=0.3
-            )
+            try:
+                response = assistant.llm_client.chat.completions.create(
+                    model="kimi-k2-0905-preview",  # New Kimi K2 model
+                    max_tokens=1000,
+                    messages=[{
+                        "role": "system",
+                        "content": f"""You are Kimi, an AI assistant provided by Moonshot AI. You are proficient in Chinese and English conversations. You provide users with safe, helpful, and accurate answers. You will reject any questions involving terrorism, racism, or explicit content. Moonshot AI is a proper noun and should not be translated.
 
-            ai_response = response.choices[0].message.content
+CURRENT PROJECT STATUS:
+- Repository: {assistant.session_data.get('active_repo', 'None loaded')}
+- Path: {assistant.session_data.get('repo_path', 'No repository loaded')}
+- Available commands: /loadrepo, /setrepo, /files, /view, /diff, /commit, /push
+
+If a repository is loaded, you can help with code analysis, debugging, and explanations about the files in the project. The user can use /view filename to see file contents."""
+                    }, {
+                        "role": "user",
+                        "content": user_message
+                    }],
+                    temperature=0.6,
+                    timeout=30
+                )
+
+                ai_response = response.choices[0].message.content
+            except Exception as e:
+                # Fallback error handling for network issues
+                logger.error(f"Kimi K2 API error: {e}")
+                ai_response = f"🚀 Kimi K2 is thinking too hard! Network timeout.\n\nTry a simpler question or check your connection. Error: {str(e)[:100]}..."
 
         else:
             ai_response = f"{assistant.llm_type} integration not implemented yet"
@@ -624,6 +707,8 @@ def main():
     application.add_handler(CommandHandler("setrepo", set_repo))
     application.add_handler(CommandHandler("files", files))
     application.add_handler(CommandHandler("view", view_file))
+    application.add_handler(CommandHandler("edit", edit_file))
+    application.add_handler(CommandHandler("git_status", git_status))
     application.add_handler(CommandHandler("diff", diff))
     application.add_handler(CommandHandler("commit", commit))
     application.add_handler(CommandHandler("push", push))
