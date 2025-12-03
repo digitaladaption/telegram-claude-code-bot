@@ -1,10 +1,6 @@
-fastapi==0.104.1
-uvicorn==0.24.0
+# Personal Telegram Code Assistant Dependencies
 python-telegram-bot==20.7
-asyncio
 python-dotenv==1.0.0
-pydantic==2.5.0
-apscheduler==3.10.4
-aiofiles==23.2.1
-loguru==0.7.2
+anthropic==0.25.0
+requests==2.31.0
 GitPython==3.1.40
