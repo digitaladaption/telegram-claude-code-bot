@@ -115,7 +115,9 @@ class PersonalCodeAssistant:
             'repo_path': None,
             'repo_url': None,
             'current_file': None,
-            'last_command': None
+            'last_command': None,
+            'pending_fix': None,  # Store pending fix requests
+            'fix_context': None
         }
 
     def save_session(self):
@@ -339,6 +341,146 @@ class PersonalCodeAssistant:
         except Exception as e:
             return {'success': False, 'error': f'Error writing file: {str(e)}'}
 
+    def analyze_file(self, file_path: str) -> Dict:
+        """Analyze file for issues using AI"""
+        if not self.session_data['repo_path']:
+            return {'success': False, 'error': 'No repository set'}
+
+        try:
+            content_result = self.read_file(file_path)
+            if not content_result['success']:
+                return content_result
+
+            file_content = content_result['content']
+
+            if not self.llm_client or not self.llm_type:
+                return {'success': False, 'error': 'No LLM available for analysis'}
+
+            # Get file extension for better analysis
+            file_ext = Path(file_path).suffix.lower()
+
+            analysis_prompt = f"""Please analyze this {file_ext} file for issues:
+
+File: {file_path}
+Content:
+```{file_ext}
+{file_content}
+```
+
+Focus on:
+1. Bugs or logical errors
+2. Code quality issues
+3. Performance problems
+4. Security vulnerabilities
+5. Best practices violations
+
+Provide specific, actionable suggestions for fixes."""
+
+            if self.llm_type == "Kimi K2":
+                response = self.llm_client.chat.completions.create(
+                    model="kimi-k2-0905-preview",
+                    messages=[{
+                        "role": "system",
+                        "content": "You are Kimi, a helpful coding assistant. Analyze code for issues and provide specific, actionable fix suggestions."
+                    }, {
+                        "role": "user",
+                        "content": analysis_prompt
+                    }],
+                    max_tokens=1500,
+                    temperature=0.6,
+                    timeout=30
+                )
+                analysis = response.choices[0].message.content
+
+            elif self.llm_type == "Claude":
+                response = self.llm_client.messages.create(
+                    model="claude-3-sonnet-20241022",
+                    max_tokens=1500,
+                    messages=[{
+                        "role": "user",
+                        "content": analysis_prompt
+                    }]
+                )
+                analysis = response.content[0].text
+
+            else:
+                analysis = f"Analysis not available with {self.llm_type}"
+
+            return {
+                'success': True,
+                'file_path': file_path,
+                'analysis': analysis,
+                'file_content': file_content
+            }
+
+        except Exception as e:
+            return {'success': False, 'error': f'Analysis error: {str(e)}'}
+
+    def ai_fix_file(self, file_path: str, issue_description: str, current_content: str) -> Dict:
+        """Use AI to fix file issues"""
+        if not self.llm_client or not self.llm_type:
+            return {'success': False, 'error': 'No LLM available for fixing'}
+
+        try:
+            file_ext = Path(file_path).suffix.lower()
+
+            fix_prompt = f"""Please fix the following {file_ext} file:
+
+File: {file_path}
+Current Content:
+```{file_ext}
+{current_content}
+```
+
+Issue to Fix:
+{issue_description}
+
+Requirements:
+1. Fix the identified issue
+2. Maintain existing functionality
+3. Follow best practices
+4. Provide clean, well-commented code
+5. Return ONLY the fixed file content (no explanations)"""
+
+            if self.llm_type == "Kimi K2":
+                response = self.llm_client.chat.completions.create(
+                    model="kimi-k2-0905-preview",
+                    messages=[{
+                        "role": "system",
+                        "content": "You are Kimi, a coding assistant. Fix code issues and return ONLY the corrected file content without explanations."
+                    }, {
+                        "role": "user",
+                        "content": fix_prompt
+                    }],
+                    max_tokens=2000,
+                    temperature=0.3,  # Lower temperature for more precise fixes
+                    timeout=45
+                )
+                fixed_content = response.choices[0].message.content
+
+            elif self.llm_type == "Claude":
+                response = self.llm_client.messages.create(
+                    model="claude-3-sonnet-20241022",
+                    max_tokens=2000,
+                    messages=[{
+                        "role": "user",
+                        "content": fix_prompt + "\n\nReturn ONLY the fixed file content, no explanations."
+                    }]
+                )
+                fixed_content = response.content[0].text
+
+            else:
+                return {'success': False, 'error': f'Fixing not available with {self.llm_type}'}
+
+            return {
+                'success': True,
+                'fixed_content': fixed_content.strip(),
+                'file_path': file_path
+            }
+
+        except Exception as e:
+            return {'success': False, 'error': f'Fix error: {str(e)}'}
+
     def get_git_diff(self) -> str:
         """Get git diff"""
         if not self.session_data['repo_path']:
@@ -424,10 +566,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📖 View code: `/view filename.py`
 🤖 Get AI help: Just ask me anything about your code!
 
+**🔥 AI-Powered Workflow:**
+🔍 `/analyze filename` - AI analyzes code for issues
+🔧 `/fix filename issue` - AI suggests fixes
+✅ `/approve_fix` - Apply AI suggested fix
+❌ `/reject_fix` - Discard AI fix
+📝 `/ai_commit "message"` - Smart git commits
+
 **Git Operations:**
 /diff - See changes
 /commit "message" - Save changes
 /push - Push to GitHub
+/status - Show bot status
 
 Ready to code from your phone! 📱✨"""
 
@@ -552,6 +702,251 @@ async def git_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Git status error: {result.stderr}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def analyze_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Analyze file for issues"""
+    if not context.args:
+        await update.message.reply_text("Usage: `/analyze filename`")
+        return
+
+    file_path = " ".join(context.args)
+    await update.message.reply_text("🔍 **Analyzing file...**")
+
+    result = assistant.analyze_file(file_path)
+
+    if result['success']:
+        await update.message.reply_text(
+            f"🔍 **Analysis of {file_path}:**\n\n{result['analysis']}\n\n"
+            f"💡 **Next Steps:**\n"
+            f"• `/fix {file_path}` - Ask AI to fix identified issues\n"
+            f"• `/view {file_path}` - View current content\n"
+            f"• `/edit {file_path} content` - Manually edit"
+        )
+    else:
+        await update.message.reply_text(f"❌ Analysis error: {result['error']}")
+
+async def fix_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask AI to fix file issues"""
+    if not context.args:
+        await update.message.reply_text("Usage: `/fix filename issue_description`")
+        return
+
+    args = context.args
+    file_path = args[0]
+    issue_description = " ".join(args[1:]) if len(args) > 1 else "General issues found"
+
+    # Read current file content
+    content_result = assistant.read_file(file_path)
+    if not content_result['success']:
+        await update.message.reply_text(f"❌ Cannot read file: {content_result['error']}")
+        return
+
+    current_content = content_result['content']
+
+    # Store fix request in session
+    assistant.session_data['pending_fix'] = {
+        'file_path': file_path,
+        'issue_description': issue_description,
+        'current_content': current_content
+    }
+    assistant.session_data['fix_context'] = issue_description
+    assistant.save_session()
+
+    await update.message.reply_text(
+        f"🔧 **Analyzing {file_path} for issues...**\n\n"
+        f"📝 **Issue:** {issue_description}\n\n"
+        f"⏳ AI is working on a fix..."
+    )
+
+    try:
+        # Try to get AI fix immediately
+        fix_result = assistant.ai_fix_file(file_path, issue_description, current_content)
+
+        if fix_result['success']:
+            # Show diff of proposed changes
+            diff = assistant.get_git_diff()
+            if diff and diff != "No changes to commit":
+                await update.message.reply_text(
+                    f"✅ **AI Fixed {file_path}!**\n\n"
+                    f"📝 **Changes Made:**\n```\n{diff[:1000]}...\n```"
+                    "\n"
+                    f"**Review the changes:**\n"
+                    f"• `/approve_fix` - Accept and apply the fix\n"
+                    f"• `/reject_fix` - Discard the fix\n"
+                    f"• `/show_fix` - See the complete fixed file"
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ **AI Fixed {file_path}!**\n\n"
+                    f"📝 **No visible changes** - the fix may be subtle.\n\n"
+                    f"**Next Steps:**\n"
+                    f"• `/view {file_path}` - Review the fixed content\n"
+                    f"• `/approve_fix` - Accept if it looks good"
+                    f"• `/diff` - Check for any differences"
+                )
+
+            # Store the fixed content
+            assistant.session_data['pending_fix']['fixed_content'] = fix_result['fixed_content']
+            assistant.save_session()
+
+        else:
+            await update.message.reply_text(f"❌ AI couldn't fix the file: {fix_result['error']}")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Fix error: {str(e)}")
+
+async def approve_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Apply the AI fix"""
+    if not assistant.session_data.get('pending_fix'):
+        await update.message.reply_text("❌ No pending fix to approve")
+        return
+
+    fix_data = assistant.session_data['pending_fix']
+    file_path = fix_data['file_path']
+    fixed_content = fix_data.get('fixed_content')
+
+    if not fixed_content:
+        await update.message.reply_text("❌ No fixed content available")
+        return
+
+    # Apply the fix
+    result = assistant.edit_file(file_path, fixed_content)
+
+    if result['success']:
+        assistant.session_data['pending_fix'] = None
+        assistant.session_data['fix_context'] = None
+        assistant.save_session()
+
+        await update.message.reply_text(
+            f"✅ **Fix Applied!** 🎉\n\n"
+            f"📄 **File:** {file_path}\n\n"
+            f"🔄 **Next Steps:**\n"
+            f"• `/diff` - Review changes\n"
+            f"• `/commit 'Your fix description'` - Commit to git\n"
+            f"• `/push` - Push to GitHub"
+        )
+    else:
+        await update.reply_text(f"❌ Failed to apply fix: {result['error']}")
+
+async def reject_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reject the AI fix"""
+    if not assistant.session_data.get('pending_fix'):
+        await update.message.reply_text("❌ No pending fix to reject")
+        return
+
+    fix_data = assistant.session_data['pending_fix']
+    file_path = fix_data['file_path']
+
+    assistant.session_data['pending_fix'] = None
+    assistant.session_data['fix_context'] = None
+    assistant.save_session()
+
+    await update.reply_text(
+        f"❌ **Fix Rejected**\n\n"
+        f"📄 **File:** {file_path}\n"
+        f"💡 No changes were made."
+    )
+
+async def show_fix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the complete fixed file content"""
+    if not assistant.session_data.get('pending_fix'):
+        await update.message.reply_text("❌ No pending fix to show")
+        return
+
+    fix_data = assistant.session_data['pending_fix']
+    file_path = fix_data['file_path']
+    fixed_content = fix_data.get('fixed_content')
+
+    if not fixed_content:
+        await update.message.reply_text("❌ No fixed content available")
+        return
+
+    # Truncate if too long for Telegram
+    if len(fixed_content) > 3000:
+        fixed_content = fixed_content[:3000] + "\n\n... (content truncated)"
+
+    await update.message.reply_text(
+        f"📄 **Fixed {file_path}:**\n\n"
+        f"```{Path(file_path).suffix}\n{fixed_content}\n```\n\n"
+        f"**Actions:**\n"
+        f"• `/approve_fix` - Apply this fix\n"
+        f"• `/reject_fix` - Discard this fix"
+    )
+
+async def ai_commit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """AI-powered git commit"""
+    if not context.args:
+        await update.message.reply_text("Usage: `/ai_commit \"commit message\"`")
+        return
+
+    commit_message = " ".join(context.args)
+
+    # Get git diff to understand changes
+    diff_text = assistant.get_git_diff()
+
+    if diff_text == "No changes to commit":
+        await update.message.reply_text("❌ No changes to commit")
+        return
+
+    # If AI available, enhance commit message
+    if assistant.llm_client and assistant.llm_type:
+        try:
+            enhancement_prompt = f"""Enhance this commit message based on the changes:
+
+Current message: {commit_message}
+Git diff:
+```
+{diff_text}
+```
+
+Provide a more descriptive commit message following conventional commit format (type(scope): description"""
+
+            if assistant.llm_type == "Kimi K2":
+                response = assistant.llm_client.chat.completions.create(
+                    model="kimi-k2-0905-preview",
+                    messages=[{
+                        "role": "system",
+                        "content": "You are a helpful coding assistant. Improve commit messages following conventional commit format."
+                    }, {
+                        "role": "user",
+                        "content": enhancement_prompt
+                    }],
+                    max_tokens=200,
+                    temperature=0.7,
+                    timeout=15
+                )
+                enhanced_message = response.choices[0].message.content.strip()
+
+            elif assistant.llm_type == "Claude":
+                response = assistant.llm_client.messages.create(
+                    model="claude-3-sonnet-20241022",
+                    max_tokens=200,
+                    messages=[{
+                        "role": "user",
+                        "content": enhancement_prompt
+                    }]
+                )
+                enhanced_message = response.content[0].text.strip()
+
+            else:
+                enhanced_message = commit_message
+
+            commit_message = enhanced_message
+
+        except Exception:
+            # Fallback to original message
+            pass
+
+    result = assistant.git_commit(commit_message)
+
+    if result['success']:
+        await update.message.reply_text(
+            f"✅ **Changes Committed!**\n\n"
+            f"📝 **Message:** {commit_message}\n\n"
+            f"🚀 **Next:** Use `/push` to send to GitHub"
+        )
+    else:
+        await update.message.reply_text(f"❌ Commit failed: {result['error']}")
 
 async def diff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show git diff"""
@@ -709,6 +1104,12 @@ def main():
     application.add_handler(CommandHandler("view", view_file))
     application.add_handler(CommandHandler("edit", edit_file))
     application.add_handler(CommandHandler("git_status", git_status))
+    application.add_handler(CommandHandler("analyze", analyze_file))
+    application.add_handler(CommandHandler("fix", fix_file))
+    application.add_handler(CommandHandler("approve_fix", approve_fix))
+    application.add_handler(CommandHandler("reject_fix", reject_fix))
+    application.add_handler(CommandHandler("show_fix", show_fix))
+    application.add_handler(CommandHandler("ai_commit", ai_commit))
     application.add_handler(CommandHandler("diff", diff))
     application.add_handler(CommandHandler("commit", commit))
     application.add_handler(CommandHandler("push", push))
